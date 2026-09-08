@@ -9,7 +9,6 @@ Time spent: approximately **2 hours 10 minutes elapsed**, from the first commit
 (`d70116c`, 8 September 2026 at 10:58:38 WIB) to the documentation checkpoint at
 13:09:02 WIB that day. This includes review and waiting time; it is not an active-work
 timer and excludes planning before the first commit and any later recording work.
-Walkthrough recording: not yet linked.
 
 ## Quick start
 
