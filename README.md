@@ -1,7 +1,8 @@
 # Ottodot trial booking
 
 Trial-class booking with Next.js, TypeScript, Prisma, and SQLite.
-The database and seed data are set up. Booking and payment flows are not implemented yet.
+Booking creation, availability, and class rosters are available through the API.
+Payments and the booking UI are not implemented yet.
 
 ## Quick start
 
@@ -72,7 +73,9 @@ and `failed`.
 Booking indexes cover `(trialClassId, status)` and `(studentId, trialClassId, status)`.
 Student/class pairs are not unique because failed or cancelled bookings must allow retries.
 Prisma checks enum values; raw SQLite writes can bypass those checks.
-Capacity limits and duplicate confirmation checks are not implemented yet.
+Booking creation rejects confirmed duplicates and currently full classes. Pending bookings
+do not reserve seats. Payment confirmation is not implemented yet; it will need to recheck
+capacity and duplicates atomically.
 
 SQLite requires no separate database server. Prisma 6.12.0 includes the SQLite connector
 and avoids the config dependency flagged by `npm audit` in 6.19.3. Setup opens the SQLite
@@ -92,5 +95,40 @@ SQLite implementation. See the [Prisma SQLite reference](https://docs.prisma.io/
 - Snapshot data and migration status against a freshly seeded database.
 
 Tests do not change `dev.db`. GitHub Actions runs setup, tests, and the production build.
+
+Booking tests also cover input validation, pending bookings, retries, full classes,
+confirmed-only rosters, stale availability, and HTTP responses. They use a separate
+temporary SQLite database and reseed before each test.
+
+## API
+
+| Method | Path | Result |
+| --- | --- | --- |
+| GET | `/api/students` | Students ordered by name |
+| GET | `/api/trial-classes` | Classes with confirmed count, seats remaining, and `availability: "advisory"` |
+| POST | `/api/bookings` | Create a `pending_payment` booking (201) |
+| GET | `/api/bookings/:id` | Booking and payment attempts |
+| GET | `/api/trial-classes/:id/roster` | Class details, confirmed count, and confirmed students |
+
+```bash
+curl http://localhost:3000/api/trial-classes
+curl -i http://localhost:3000/api/bookings \
+  -H 'Content-Type: application/json' \
+  -d '{"studentId":"student-eve","trialClassId":"class-available"}'
+curl http://localhost:3000/api/trial-classes/class-available/roster
+```
+
+Read the returned booking ID at `/api/bookings/:id`. The booking stays pending;
+the roster still lists Alice and availability remains 1/4 confirmed.
+Use `student-alice` to test a duplicate, or `class-full` with Eve to test capacity.
+Both return 409 and create no booking. Eve's earlier failed payment does not block a new attempt.
+
+Errors use `{"error":{"code":"...","message":"..."}}`: invalid input returns 400,
+missing records 404, and duplicate/full conflicts 409. Responses use `Cache-Control: no-store`.
+Only `studentId` and `trialClassId` are used from the POST body; callers cannot set booking status.
+
+Availability can change after a read. Refreshing before payment can catch a full class,
+but only confirmation can guarantee a seat. The payment UI is not implemented yet.
+This local demo has no authentication; all seeded students and bookings are accessible.
 
 Seat holds, real payments, authentication, and refunds are out of scope for this take-home.
