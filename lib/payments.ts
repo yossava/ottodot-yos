@@ -1,8 +1,8 @@
 import { randomUUID } from "node:crypto";
 import { setTimeout } from "node:timers/promises";
-import { Prisma, type Booking } from "@prisma/client";
+import type { Prisma, Booking } from "@prisma/client";
 import { BookingError } from "./bookings";
-import { prisma } from "./prisma";
+import { isDatabaseBusy, prisma } from "./prisma";
 
 // Called only after acquiring the write lock and recording a successful mock payment.
 async function confirmPaidBooking(tx: Prisma.TransactionClient, booking: Booking) {
@@ -53,11 +53,7 @@ export async function processMockPayment(input: unknown) {
         return { payment, ...await confirmPaidBooking(tx, booking) };
       }, { maxWait: 5000, timeout: 5000 });
     } catch (error) {
-      const busy = error instanceof Prisma.PrismaClientKnownRequestError && (
-        error.code === "P1008" || error.code === "P2034" ||
-        (error.code === "P2010" && ["5", "6"].includes(String(error.meta?.code)))
-      );
-      if (!busy) throw error;
+      if (!isDatabaseBusy(error)) throw error;
       if (attempt === 2) throw new BookingError("DATABASE_BUSY", "Database is busy. Try again shortly.");
       await setTimeout(25 * (attempt + 1));
     }

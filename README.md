@@ -1,7 +1,7 @@
 # Ottodot trial booking
 
 Trial-class booking with Next.js, TypeScript, Prisma, and SQLite.
-Includes a booking page, mock payments, live availability, and confirmed-student rosters.
+Includes a booking page, mock payments, advisory availability, and confirmed-student rosters.
 
 ## Quick start
 
@@ -106,7 +106,8 @@ npm run test:e2e
 
 This builds the app and starts a separate server on port 3200. Keep that port free.
 Tests cover successful payment and roster updates, failed payment without roster membership,
-and the pre-payment check when another student takes the last seat. The temporary database
+recovery after a lost payment response, and the pre-payment check when another student
+takes the last seat. The temporary database
 is removed when the test server stops; `dev.db` and the running demo are untouched.
 Playwright traces for failed tests are saved under `test-results/`.
 
@@ -149,6 +150,7 @@ Both return 409 and create no booking. Eve's earlier failed payment does not blo
 
 Errors use `{"error":{"code":"...","message":"..."}}`: invalid input returns 400,
 missing records 404, and duplicate/full conflicts 409. Responses use `Cache-Control: no-store`.
+Recognized database contention returns 503 `DATABASE_BUSY`; retry the request shortly.
 Only `studentId` and `trialClassId` are used from the POST body; callers cannot set booking status.
 
 Availability can change after a read. Refreshing before payment can catch a full class,
