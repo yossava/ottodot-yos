@@ -5,7 +5,7 @@ import { BookingResult, type BookingView, type PaymentView } from "./booking-res
 
 type Student = { id: string; name: string };
 type TrialClass = { id: string; title: string; startsAt: string; capacity: number; confirmedCount: number; seatsRemaining: number };
-type Roster = TrialClass & { students: Student[] };
+type Roster = Omit<TrialClass, "seatsRemaining"> & { students: Student[] };
 type BookingDetail = BookingView & { paymentAttempts: PaymentView[] };
 
 async function request<T>(path: string, body?: unknown): Promise<T> {
@@ -76,6 +76,7 @@ export default function Home() {
     const latest = await request<BookingDetail>(`bookings/${booking.id}`);
     setBooking(latest); setPayment(latest.paymentAttempts.at(-1) ?? null);
     setPaymentUncertain(false);
+    return latest;
   }
 
   async function pay(outcome: "success" | "failure") {
@@ -91,11 +92,12 @@ export default function Home() {
       setBooking(result.booking); setPayment(result.payment);
     } catch (error) {
       // A lost response may follow a committed payment. Read its state before allowing a retry.
-      try { await readBooking(); } catch {
+      let recovered;
+      try { recovered = await readBooking(); } catch {
         setPaymentUncertain(true);
         throw new Error("Payment result could not be checked. Refresh booking status before trying again.");
       }
-      throw error;
+      if (recovered?.status === "pending_payment") throw error;
     }
     await refresh();
   }

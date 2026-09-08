@@ -24,9 +24,9 @@ const { directory, databaseUrl } = await vi.hoisted(async () => {
   return { directory, databaseUrl: `file:${path}` };
 });
 
-vi.mock("../lib/prisma", async () => {
+vi.mock("../lib/prisma", async (importOriginal) => {
   const { PrismaClient } = await import("@prisma/client");
-  return { prisma: new PrismaClient({ datasourceUrl: databaseUrl }) };
+  return { ...await importOriginal<typeof import("../lib/prisma")>(), prisma: new PrismaClient({ datasourceUrl: databaseUrl }) };
 });
 
 beforeEach(() => {
@@ -158,6 +158,32 @@ test("unexpected failures return a generic 500 without internal details", async 
   } finally {
     log.mockRestore();
   }
+});
+
+test.each([
+  ["P1008", undefined], ["P2034", undefined],
+  ["P2010", { code: "5" }], ["P2010", { code: "6" }],
+] as const)("booking creation maps database contention %s to 503", async (code, meta) => {
+  const transaction = vi.spyOn(prisma, "$transaction").mockRejectedValueOnce(
+    new Prisma.PrismaClientKnownRequestError("busy", { code, meta, clientVersion: "6.12.0" }),
+  );
+  try {
+    const response = await POST(request(input));
+    expect(response.status).toBe(503);
+    expect(await response.json()).toMatchObject({ error: { code: "DATABASE_BUSY" } });
+    expect(transaction).toHaveBeenCalledTimes(1);
+  } finally { transaction.mockRestore(); }
+});
+
+test("unrelated database errors remain internal failures", async () => {
+  const log = vi.spyOn(console, "error").mockImplementation(() => {});
+  try {
+    const response = await apiResponse(async () => {
+      throw new Prisma.PrismaClientKnownRequestError("SQL error", { code: "P2010", meta: { code: "1" }, clientVersion: "6.12.0" });
+    });
+    expect(response.status).toBe(500);
+    expect(await response.json()).toMatchObject({ error: { code: "INTERNAL_ERROR" } });
+  } finally { log.mockRestore(); }
 });
 
 test("successful payment confirms a booking and adds the student to the roster", async () => {

@@ -1,10 +1,14 @@
 import { BookingError } from "./bookings";
+import { isDatabaseBusy } from "./prisma";
 
 export async function apiResponse(action: () => Promise<unknown>, status = 200) {
   const headers = { "Cache-Control": "no-store" };
   try {
     return Response.json(await action(), { status, headers });
   } catch (error) {
+    if (isDatabaseBusy(error)) {
+      error = new BookingError("DATABASE_BUSY", "Database is busy. Try again shortly.");
+    }
     if (error instanceof BookingError) {
       const status = error.code === "INVALID_INPUT" ? 400 : error.code === "NOT_FOUND" ? 404 : error.code === "DATABASE_BUSY" ? 503 : 409;
       return Response.json({ error: { code: error.code, message: error.message } }, { status, headers });
