@@ -3,11 +3,21 @@
 Trial-class booking with Next.js, TypeScript, Prisma, and SQLite.
 Includes a booking page, mock payments, advisory availability, and confirmed-student rosters.
 
+See [AI usage](AI_USAGE.md).
+
+Time spent: approximately **2 hours 10 minutes elapsed**, from the first commit
+(`d70116c`, 8 September 2026 at 10:58:38 WIB) to the documentation checkpoint at
+13:09:02 WIB that day. This includes review and waiting time; it is not an active-work
+timer and excludes planning before the first commit and any later recording work.
+Walkthrough recording: not yet linked.
+
 ## Quick start
 
 Use Node.js 22.14 or newer and npm. No credentials or external services are required.
 
 ```bash
+git clone https://github.com/yossava/ottodot-yos.git
+cd ottodot-yos
 npm install
 npm run db:setup
 npm test
@@ -107,8 +117,9 @@ npm run test:e2e
 This builds the app and starts a separate server on port 3200. Keep that port free.
 Tests cover successful payment and roster updates, failed payment without roster membership,
 recovery after a lost payment response, and the pre-payment check when another student
-takes the last seat. The temporary database
-is removed when the test server stops; `dev.db` and the running demo are untouched.
+takes the last seat. The temporary database is removed when the test server stops;
+`dev.db` is untouched. The command rebuilds `.next`; stop any production server
+using that build before running it.
 Playwright traces for failed tests are saved under `test-results/`.
 
 `npm test` uses a temporary database and checks:
@@ -123,6 +134,32 @@ Booking tests also cover input validation, pending bookings, retries, full class
 confirmed-only rosters, stale availability, and HTTP responses. They use a separate
 temporary SQLite database and reseed before each test.
 UI rendering tests cover separate booking/payment statuses and disabled recovery controls.
+
+### Scenario coverage
+
+Verified from a fresh clone of `71cf64b` on 8 September 2026 with Node 22.14.0 and
+npm 10.9.2 on macOS: install, database setup, 41 Vitest cases, four Chromium cases,
+typecheck, production build, seed/reset/restore, and migration status all passed.
+No existing `.env`, runtime database, or copied `node_modules` was used.
+The development server was checked on port 3300 to leave an existing demo on 3000 running.
+
+The test names below are in `tests/bookings.test.ts` unless noted otherwise.
+
+| Scenario | Test name | Expected result |
+| --- | --- | --- |
+| Successful payment | `successful payment confirms a booking and adds the student to the roster` | `succeeded` / `confirmed`; student joins roster |
+| Failed payment and retry | `failed payment consumes no seat and a new booking can succeed` | `payment_failed`; no roster change; new attempt can confirm |
+| Duplicate or full class | `rejects a confirmed duplicate and a full class without inserting a booking` | Conflict; no new booking |
+| Confirmed-only roster | `roster ignores payment results and all unconfirmed statuses` | Pending, failed, cancelled, and capacity-unavailable bookings excluded |
+| Last-seat race across processes | `separate processes competing for the last seat cannot overbook` | Two successful mock payments; exactly one new confirmation; 4/4 roster |
+| Repeated callback | `simultaneous callbacks on one booking create only one payment attempt` | One payment attempt; no double confirmation |
+| Lost payment response | `a lost successful payment response recovers the result and refreshes the roster` in `e2e/booking.e2e.ts` | Authoritative status recovered; counts and roster refreshed |
+
+Run just the cross-process race check:
+
+```bash
+npm test -- tests/bookings.test.ts -t 'separate processes competing for the last seat cannot overbook'
+```
 
 ## API
 
@@ -193,11 +230,16 @@ cannot confirm. Expiring checkout holds are another option, deferred from this t
 
 ## Last-seat race
 
-Create two pending bookings in `class-last-seat`, using Eve and Finn. Both can reach payment
+Through the API, create two pending bookings in `class-last-seat`, using Eve and Finn. Both can reach payment
 because pending bookings do not reserve seats. Pay Finn first, then Eve: Finn confirms,
 Eve becomes `capacity_unavailable`, both successful payments are recorded, and the roster
 has exactly four students. Sending the payment requests together must produce the same counts,
 although either student can win.
+
+In the UI, paying after the other booking has already confirmed will normally be blocked
+by the pre-payment check. To show the paid-without-seat outcome deliberately, process both
+payments through the API, then refresh the losing booking's status in its original browser tab.
+The concurrent automated test proves the remaining race after an availability check.
 
 The SQLite payment transaction begins with a no-op `UPDATE` on the booking, before reading
 its status or class capacity. This acquires SQLite's database-wide write lock. While it is held,
@@ -205,7 +247,7 @@ the service validates the pending state, records the mock payment, checks duplic
 capacity, and updates the booking. Competing writers must wait or fail with a lock error.
 All reads use the transaction client. There is no application-level mutex.
 
-Known lock/conflict errors retry the entire transaction up to three times. Exhaustion returns
+Known lock/conflict errors allow three total transaction attempts (two retries). Exhaustion returns
 503 `DATABASE_BUSY`. Other errors propagate and roll back the transaction. Since the payment
 is simulated in SQLite, rollback removes both changes; this would not undo a real provider charge.
 The payment service cannot protect arbitrary SQL writes that bypass it.
@@ -224,3 +266,43 @@ rollback, and bounded retries. The last-seat tests run both concurrent service c
 independent processes released from a shared start barrier. They require both payment calls to
 finish successfully with one confirmed booking and two successful payment attempts; a lock
 error does not count as a passing race test.
+
+## Responsibility boundaries
+
+| Layer | Responsibility |
+| --- | --- |
+| UI | Required selections, advisory availability, pre-payment refresh, in-flight controls, and separate payment/booking feedback. No optimistic confirmation. |
+| Backend | Input validation, duplicate/capacity checks, status transitions, and bounded payment retries. Route handlers delegate to `lib/bookings.ts` and `lib/payments.ts`. |
+| Database | Foreign keys, indexes, persistence, and transaction atomicity. SQLite's write lock serializes confirmation; service checks enforce capacity and confirmed duplicates. |
+| Background work | None in this demo. A real integration would need webhook retries, reconciliation, stale-pending cleanup, and void/refund processing. |
+
+## Assumptions and scope
+
+I use one synthetic parent and pre-existing children. Registration and login are not needed
+to exercise the requested booking flow; this is not a publicly deployable authenticated app.
+Classes have a stored capacity, seeded at four, and times are displayed in WIB.
+The mock payment result and booking update share one SQLite transaction. That atomicity
+does not extend to an external payment provider.
+
+I deferred seat holds, regular enrollment, real payments, working refunds/class transfers,
+notifications, waitlists, and admin CRUD. An expiring hold remains a good production
+candidate, but needs release on cancellation and failure plus automatic expiry so abandoned
+checkouts do not indefinitely block seats. The take-home instead demonstrates authoritative
+confirmation under contention and makes the paid-without-seat outcome explicit.
+
+## Monitoring after release
+
+These checks are planned, not implemented monitoring:
+
+- Alert on confirmed counts above capacity or duplicate confirmed student/class pairs.
+- Track successful payments without confirmed bookings until void/refund reconciliation finishes.
+- Track payment failures, database-busy responses, unexpected 5xx errors, and transaction latency.
+- Review ageing pending bookings and repeated callbacks. With a real provider, also track webhook failures and refund delays.
+
+## Next steps
+
+Before accepting real payments, add identity and ownership checks, provider idempotency and
+webhook handling, and an explicit void/refund lifecycle. Choose between short-lived checkout
+holds and payment authorization/capture based on the provider's capabilities. For higher
+write throughput, move to PostgreSQL with class-row locking and a confirmed-only unique index.
+Keep the race and lost-response tests when replacing those pieces.
