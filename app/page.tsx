@@ -2,8 +2,10 @@ export default function Home() {
   return (
     <main>
       <h1>Ottodot trial booking</h1>
-      <p>Project foundation is ready. Booking and payment flows are coming in the next slices.</p>
-      <p>See the README for database setup, demo fixtures, and verification commands.</p>
+      <h2>Dev note</h2>
+      <p>Foundation is in place: app setup, database schema, migrations, and demo seed data.</p>
+      <p>Next up: booking and payment flows.</p>
+      <p>Setup commands, demo fixtures, and verification steps are in the README.</p>
     </main>
   );
 }
