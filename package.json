@@ -1,0 +1,34 @@
+{
+  "name": "ottodot-yos",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "engines": { "node": ">=22.14.0" },
+  "scripts": {
+    "dev": "next dev",
+    "build": "next build",
+    "start": "next start",
+    "test": "vitest run",
+    "typecheck": "next typegen && tsc --noEmit",
+    "db:setup": "node scripts/env.mjs && prisma generate && node scripts/create-db.mjs && prisma migrate deploy && npm run db:seed",
+    "db:seed": "node scripts/env.mjs && tsx prisma/seed.ts",
+    "db:reset": "node scripts/env.mjs && prisma migrate reset --force --skip-seed && npm run db:seed",
+    "db:restore-demo": "node scripts/restore-demo.mjs",
+    "db:snapshot": "DATABASE_URL=file:./demo.db npm run db:setup"
+  },
+  "dependencies": {
+    "@prisma/client": "6.12.0",
+    "next": "16.3.4",
+    "react": "^19.2.0",
+    "react-dom": "^19.2.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22",
+    "@types/react": "^19",
+    "@types/react-dom": "^19",
+    "prisma": "6.12.0",
+    "tsx": "^4.20.0",
+    "typescript": "^5.9.0",
+    "vitest": "4.1.11"
+  }
+}
