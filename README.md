@@ -1,8 +1,8 @@
 # Ottodot trial booking
 
 Trial-class booking with Next.js, TypeScript, Prisma, and SQLite.
-Booking creation, availability, and class rosters are available through the API.
-Payments and the booking UI are not implemented yet.
+Booking creation, mock payments, availability, and class rosters are available through the API.
+The booking UI is not implemented yet.
 
 ## Quick start
 
@@ -74,8 +74,8 @@ Booking indexes cover `(trialClassId, status)` and `(studentId, trialClassId, st
 Student/class pairs are not unique because failed or cancelled bookings must allow retries.
 Prisma checks enum values; raw SQLite writes can bypass those checks.
 Booking creation rejects confirmed duplicates and currently full classes. Pending bookings
-do not reserve seats. Payment confirmation is not implemented yet; it will need to recheck
-capacity and duplicates atomically.
+do not reserve seats. Payment processing rechecks capacity and duplicates inside a write
+transaction before confirming a booking.
 
 SQLite requires no separate database server. Prisma 6.12.0 includes the SQLite connector
 and avoids the config dependency flagged by `npm audit` in 6.19.3. Setup opens the SQLite
@@ -107,6 +107,7 @@ temporary SQLite database and reseed before each test.
 | GET | `/api/students` | Students ordered by name |
 | GET | `/api/trial-classes` | Classes with confirmed count, seats remaining, and `availability: "advisory"` |
 | POST | `/api/bookings` | Create a `pending_payment` booking (201) |
+| POST | `/api/mock-payments` | Process a mock success/failure and return payment and booking outcomes |
 | GET | `/api/bookings/:id` | Booking and payment attempts |
 | GET | `/api/trial-classes/:id/roster` | Class details, confirmed count, and confirmed students |
 
@@ -118,7 +119,7 @@ curl -i http://localhost:3000/api/bookings \
 curl http://localhost:3000/api/trial-classes/class-available/roster
 ```
 
-Read the returned booking ID at `/api/bookings/:id`. The booking stays pending;
+Read the returned booking ID at `/api/bookings/:id`. Until payment, the booking stays pending;
 the roster still lists Alice and availability remains 1/4 confirmed.
 Use `student-alice` to test a duplicate, or `class-full` with Eve to test capacity.
 Both return 409 and create no booking. Eve's earlier failed payment does not block a new attempt.
@@ -132,3 +133,68 @@ but only confirmation can guarantee a seat. The payment UI is not implemented ye
 This local demo has no authentication; all seeded students and bookings are accessible.
 
 Seat holds, real payments, authentication, and refunds are out of scope for this take-home.
+
+## Mock payments
+
+```bash
+curl -i http://localhost:3000/api/mock-payments \
+  -H 'Content-Type: application/json' \
+  -d '{"bookingId":"<booking ID>","outcome":"success"}'
+```
+
+Use `failure` to simulate a failed payment. Only pending bookings can be processed.
+The response contains separate `payment` and `booking` records, plus a nullable `reason`.
+
+| Payment | Booking | Reason |
+| --- | --- | --- |
+| `succeeded` | `confirmed` | `null` |
+| `failed` | `payment_failed` | `null` |
+| `succeeded` | `capacity_unavailable` | `CAPACITY_UNAVAILABLE` |
+| `succeeded` | `cancelled` | `DUPLICATE_CONFIRMED_BOOKING` |
+
+A processed mock outcome returns 200, including a successful payment without a seat.
+Repeating a request on a terminal booking returns 409 `BOOKING_NOT_PAYABLE` without another
+payment attempt. Invalid requests return 400; missing bookings return 404. Retries after a
+failed payment require a new booking.
+
+`cancelled` covers a second pending attempt for a student who has since confirmed the same
+class. Its successful payment remains recorded. The duplicate reason is returned by the
+payment endpoint; the stored records contain the cancelled booking and successful payment.
+
+No money moves in this demo. A real provider integration would need idempotency keys and
+webhook handling, with authorization/capture or void/refund handling when a paid booking
+cannot confirm. Expiring checkout holds are another option, deferred from this take-home.
+
+## Last-seat race
+
+Create two pending bookings in `class-last-seat`, using Eve and Finn. Both can reach payment
+because pending bookings do not reserve seats. Pay Finn first, then Eve: Finn confirms,
+Eve becomes `capacity_unavailable`, both successful payments are recorded, and the roster
+has exactly four students. Sending the payment requests together must produce the same counts,
+although either student can win.
+
+The SQLite payment transaction begins with a no-op `UPDATE` on the booking, before reading
+its status or class capacity. This acquires SQLite's database-wide write lock. While it is held,
+the service validates the pending state, records the mock payment, checks duplicates and
+capacity, and updates the booking. Competing writers must wait or fail with a lock error.
+All reads use the transaction client. There is no application-level mutex.
+
+Known lock/conflict errors retry the entire transaction up to three times. Exhaustion returns
+503 `DATABASE_BUSY`. Other errors propagate and roll back the transaction. Since the payment
+is simulated in SQLite, rollback removes both changes; this would not undo a real provider charge.
+The payment service cannot protect arbitrary SQL writes that bypass it.
+
+SQLite serializes writes across the whole database, including unrelated classes. For production
+PostgreSQL, lock the target class row with `SELECT ... FOR UPDATE` inside a transaction,
+then reread the booking, check duplicates and capacity, and confirm or reject before committing.
+Add a partial unique index on `(studentId, trialClassId) WHERE status = 'confirmed'` as a
+database constraint. Payment network calls should run outside that transaction.
+
+See [SQLite transactions](https://www.sqlite.org/lang_transaction.html) and
+[Prisma transaction errors and retries](https://www.prisma.io/docs/orm/v6/prisma-client/queries/transactions).
+
+Payment tests cover success/failure, full capacity, duplicate confirmation, repeated callbacks,
+rollback, and bounded retries. The last-seat tests run both concurrent service calls and two
+independent processes released from a shared start barrier. They require both payment calls to
+finish successfully with one confirmed booking and two successful payment attempts; a lock
+error does not count as a passing race test.

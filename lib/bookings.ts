@@ -1,7 +1,7 @@
 import { prisma } from "./prisma";
 
 export class BookingError extends Error {
-  constructor(public code: "INVALID_INPUT" | "NOT_FOUND" | "DUPLICATE_CONFIRMED_BOOKING" | "CAPACITY_UNAVAILABLE", message: string) {
+  constructor(public code: "INVALID_INPUT" | "NOT_FOUND" | "DUPLICATE_CONFIRMED_BOOKING" | "CAPACITY_UNAVAILABLE" | "BOOKING_NOT_PAYABLE" | "DATABASE_BUSY", message: string) {
     super(message);
   }
 }
