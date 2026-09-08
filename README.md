@@ -1,8 +1,7 @@
 # Ottodot trial booking
 
 Trial-class booking with Next.js, TypeScript, Prisma, and SQLite.
-Booking creation, mock payments, availability, and class rosters are available through the API.
-The booking UI is not implemented yet.
+Includes a booking page, mock payments, live availability, and confirmed-student rosters.
 
 ## Quick start
 
@@ -15,7 +14,7 @@ npm test
 npm run dev
 ```
 
-Open [localhost:3000](http://localhost:3000). The page is a placeholder.
+Open [localhost:3000](http://localhost:3000).
 Setup creates `.env` if missing, generates Prisma Client, creates the database,
 applies migrations, and seeds demo data. It preserves existing `.env` settings.
 
@@ -29,6 +28,16 @@ Use Prisma Studio to inspect the database. Stop Studio and the app before resett
 or restoring it.
 
 ## Demo data
+
+Choose Eve and Science Explorers, then book a trial. The booking stays pending and
+the roster does not change until **Simulate Successful Payment** confirms it.
+Use **Start a new booking** to try a failed payment with Finn, a duplicate with
+Alice, or a full class with Space Science. **Refresh** reloads availability and the roster.
+
+Payment and booking outcomes are shown separately. If payment succeeds but the last
+seat is gone, the page shows `capacity_unavailable` with disabled refund and class-transfer
+options. These actions are deferred; no real money is charged. Use **Refresh booking status**
+to load an outcome processed in another tab or through the API.
 
 | Class ID | Class | Confirmed / capacity |
 | --- | --- | --- |
@@ -88,6 +97,19 @@ SQLite implementation. See the [Prisma SQLite reference](https://docs.prisma.io/
 
 ## Verification
 
+Browser smoke tests use Chromium and a temporary copy of the demo database:
+
+```bash
+npx playwright install chromium
+npm run test:e2e
+```
+
+This builds the app and starts a separate server on port 3200. Keep that port free.
+Tests cover successful payment and roster updates, failed payment without roster membership,
+and the pre-payment check when another student takes the last seat. The temporary database
+is removed when the test server stops; `dev.db` and the running demo are untouched.
+Playwright traces for failed tests are saved under `test-results/`.
+
 `npm test` uses a temporary database and checks:
 
 - Migrations and repeatable seeding, including class counts and payment records.
@@ -99,6 +121,7 @@ Tests do not change `dev.db`. GitHub Actions runs setup, tests, and the producti
 Booking tests also cover input validation, pending bookings, retries, full classes,
 confirmed-only rosters, stale availability, and HTTP responses. They use a separate
 temporary SQLite database and reseed before each test.
+UI rendering tests cover separate booking/payment statuses and disabled recovery controls.
 
 ## API
 
@@ -129,7 +152,8 @@ missing records 404, and duplicate/full conflicts 409. Responses use `Cache-Cont
 Only `studentId` and `trialClassId` are used from the POST body; callers cannot set booking status.
 
 Availability can change after a read. Refreshing before payment can catch a full class,
-but only confirmation can guarantee a seat. The payment UI is not implemented yet.
+but only confirmation can guarantee a seat. The page checks availability immediately
+before starting mock payment; this check does not hold a seat.
 This local demo has no authentication; all seeded students and bookings are accessible.
 
 Seat holds, real payments, authentication, and refunds are out of scope for this take-home.

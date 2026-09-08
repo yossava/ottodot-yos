@@ -9,6 +9,7 @@
     "build": "next build",
     "start": "next start",
     "test": "vitest run",
+    "test:e2e": "npm run build && playwright test",
     "typecheck": "next typegen && tsc --noEmit",
     "db:setup": "node scripts/env.mjs && prisma generate && node scripts/create-db.mjs && prisma migrate deploy && npm run db:seed",
     "db:seed": "node scripts/env.mjs && tsx prisma/seed.ts",
@@ -23,6 +24,7 @@
     "react-dom": "^19.2.0"
   },
   "devDependencies": {
+    "@playwright/test": "^1.63.0",
     "@types/node": "^22",
     "@types/react": "^19",
     "@types/react-dom": "^19",
